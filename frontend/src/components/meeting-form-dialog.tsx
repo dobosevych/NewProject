@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { format } from 'date-fns'
 import { CalendarIcon } from 'lucide-react'
@@ -21,7 +21,8 @@ import { Field, FieldError, FieldGroup, FieldLabel } from '@/components/ui/field
 import { Input } from '@/components/ui/input'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Textarea } from '@/components/ui/textarea'
-import { useCreateMeeting } from '@/hooks/queries'
+import { useCreateMeeting, useUpdateMeeting } from '@/hooks/queries'
+import type { Meeting } from '@/lib/api'
 
 const timePattern = /^\d{2}:\d{2}$/
 
@@ -52,6 +53,19 @@ const defaultValues: MeetingFormValues = {
   participantIds: [],
 }
 
+function toFormValues(meeting: Meeting): MeetingFormValues {
+  const start = new Date(meeting.starts_at)
+  return {
+    title: meeting.title,
+    description: meeting.description,
+    date: start,
+    startTime: format(start, 'HH:mm'),
+    endTime: format(new Date(meeting.ends_at), 'HH:mm'),
+    place: meeting.place,
+    participantIds: meeting.participants.map((p) => p.id),
+  }
+}
+
 function combine(date: Date, time: string): string {
   const [hours, minutes] = time.split(':').map(Number)
   const result = new Date(date)
@@ -62,50 +76,65 @@ function combine(date: Date, time: string): string {
 type Props = {
   open: boolean
   onOpenChange: (open: boolean) => void
+  /** The meeting to edit; omit to create a new one. */
+  meeting?: Meeting | null
 }
 
-export function MeetingFormDialog({ open, onOpenChange }: Props) {
+export function MeetingFormDialog({ open, onOpenChange, meeting }: Props) {
   const [datePickerOpen, setDatePickerOpen] = useState(false)
   const createMeeting = useCreateMeeting()
+  const updateMeeting = useUpdateMeeting()
+  const isEditing = Boolean(meeting)
+  const isPending = createMeeting.isPending || updateMeeting.isPending
   const form = useForm<MeetingFormValues>({
     resolver: zodResolver(meetingSchema),
     defaultValues,
   })
 
-  const close = (next: boolean) => {
-    if (!next) form.reset(defaultValues)
-    onOpenChange(next)
-  }
+  useEffect(() => {
+    if (open) form.reset(meeting ? toFormValues(meeting) : defaultValues)
+  }, [open, meeting, form])
+
+  const close = (next: boolean) => onOpenChange(next)
 
   const onSubmit = form.handleSubmit((values) => {
-    createMeeting.mutate(
-      {
-        title: values.title.trim(),
-        description: values.description.trim(),
-        starts_at: combine(values.date, values.startTime),
-        ends_at: combine(values.date, values.endTime),
-        place: values.place.trim(),
-        participant_ids: values.participantIds,
+    const data = {
+      title: values.title.trim(),
+      description: values.description.trim(),
+      starts_at: combine(values.date, values.startTime),
+      ends_at: combine(values.date, values.endTime),
+      place: values.place.trim(),
+      participant_ids: values.participantIds,
+    }
+    const callbacks = {
+      onSuccess: (saved: Meeting) => {
+        toast.success(`Meeting "${saved.title}" ${isEditing ? 'updated' : 'created'}`)
+        close(false)
       },
-      {
-        onSuccess: (meeting) => {
-          toast.success(`Meeting "${meeting.title}" created`)
-          close(false)
-        },
-        onError: (error) => form.setError('root', { message: error.message }),
-      },
-    )
+      onError: (error: Error) => form.setError('root', { message: error.message }),
+    }
+    if (meeting) {
+      updateMeeting.mutate({ id: meeting.id, ...data }, callbacks)
+    } else {
+      createMeeting.mutate(data, callbacks)
+    }
   })
 
   return (
     <Dialog open={open} onOpenChange={close}>
-      <DialogContent className="sm:max-w-lg">
+      <DialogContent className="max-h-[calc(100svh-2rem)] grid-rows-[auto_minmax(0,1fr)_auto] sm:max-w-lg">
         <DialogHeader>
-          <DialogTitle>Add meeting</DialogTitle>
+          <DialogTitle>{isEditing ? 'Edit meeting' : 'Add meeting'}</DialogTitle>
           <DialogDescription>Fill in the details and pick who takes part.</DialogDescription>
         </DialogHeader>
 
-        <form id="meeting-form" onSubmit={onSubmit} noValidate>
+        {/* Only the fields scroll; header and footer stay put on short screens. */}
+        <form
+          id="meeting-form"
+          onSubmit={onSubmit}
+          noValidate
+          className="-mx-6 overflow-y-auto px-6 py-1"
+        >
           <FieldGroup>
             <Controller
               name="title"
@@ -248,8 +277,8 @@ export function MeetingFormDialog({ open, onOpenChange }: Props) {
           <Button type="button" variant="outline" onClick={() => close(false)}>
             Cancel
           </Button>
-          <Button type="submit" form="meeting-form" disabled={createMeeting.isPending}>
-            {createMeeting.isPending ? 'Saving...' : 'Add meeting'}
+          <Button type="submit" form="meeting-form" disabled={isPending}>
+            {isPending ? 'Saving...' : isEditing ? 'Save changes' : 'Add meeting'}
           </Button>
         </DialogFooter>
       </DialogContent>

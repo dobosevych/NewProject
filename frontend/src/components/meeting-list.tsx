@@ -1,5 +1,4 @@
-import { format, isSameDay } from 'date-fns'
-import { CalendarXIcon, MapPinIcon, PlusIcon, Trash2Icon } from 'lucide-react'
+import { CalendarXIcon, MapPinIcon, PencilIcon, PlusIcon, Trash2Icon } from 'lucide-react'
 
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
@@ -16,18 +15,9 @@ import {
 } from '@/components/ui/table'
 import { useMeetings } from '@/hooks/queries'
 import type { Meeting, Participant } from '@/lib/api'
+import { formatWhen } from '@/lib/format'
 
 const MAX_BADGES = 3
-
-function formatWhen(meeting: Meeting): string {
-  const start = new Date(meeting.starts_at)
-  const end = new Date(meeting.ends_at)
-  const day = format(start, 'EEE, d MMM yyyy')
-  if (isSameDay(start, end)) {
-    return `${day} · ${format(start, 'HH:mm')}–${format(end, 'HH:mm')}`
-  }
-  return `${day} ${format(start, 'HH:mm')} – ${format(end, 'EEE, d MMM HH:mm')}`
-}
 
 function ParticipantBadges({ participants }: { participants: Participant[] }) {
   if (participants.length === 0) {
@@ -51,32 +41,69 @@ function ParticipantBadges({ participants }: { participants: Participant[] }) {
   )
 }
 
-function DeleteButton({ meeting, onDelete }: { meeting: Meeting; onDelete: () => void }) {
-  return (
-    <Button
-      variant="ghost"
-      size="icon-sm"
-      aria-label={`Delete ${meeting.title}`}
-      onClick={onDelete}
-    >
-      <Trash2Icon />
-    </Button>
-  )
-}
-
 type Props = {
   onAdd: () => void
+  onOpen: (meeting: Meeting) => void
+  onEdit: (meeting: Meeting) => void
   onDelete: (meeting: Meeting) => void
 }
 
-export function MeetingList({ onAdd, onDelete }: Props) {
+function RowActions({
+  meeting,
+  onEdit,
+  onDelete,
+}: { meeting: Meeting } & Pick<Props, 'onEdit' | 'onDelete'>) {
+  // stopPropagation: the row itself opens the details view.
+  return (
+    <div className="flex shrink-0 gap-1">
+      <Button
+        variant="ghost"
+        size="icon-sm"
+        aria-label={`Edit ${meeting.title}`}
+        title="Edit"
+        onClick={(event) => {
+          event.stopPropagation()
+          onEdit(meeting)
+        }}
+      >
+        <PencilIcon />
+      </Button>
+      <Button
+        variant="ghost"
+        size="icon-sm"
+        aria-label={`Delete ${meeting.title}`}
+        title="Delete"
+        onClick={(event) => {
+          event.stopPropagation()
+          onDelete(meeting)
+        }}
+      >
+        <Trash2Icon />
+      </Button>
+    </div>
+  )
+}
+
+/** Keyboard-reachable title; clicks bubble up to the row/card, which opens the details. */
+function MeetingTitle({ meeting }: { meeting: Meeting }) {
+  return (
+    <button
+      type="button"
+      className="rounded-sm text-left font-serif text-xl font-medium text-heading transition-colors outline-none group-hover:text-hover focus-visible:ring-3 focus-visible:ring-ring/50"
+    >
+      {meeting.title}
+    </button>
+  )
+}
+
+export function MeetingList({ onAdd, onOpen, onEdit, onDelete }: Props) {
   const meetings = useMeetings()
 
   if (meetings.isPending) {
     return (
       <div className="flex flex-col gap-3">
         {Array.from({ length: 3 }, (_, i) => (
-          <Skeleton key={i} className="h-16 w-full" />
+          <Skeleton key={i} className="h-16 w-full rounded-[20px] bg-card" />
         ))}
       </div>
     )
@@ -98,9 +125,12 @@ export function MeetingList({ onAdd, onDelete }: Props) {
 
   if (meetings.data.length === 0) {
     return (
-      <div className="flex flex-col items-center gap-3 rounded-xl border border-dashed py-16 text-center">
-        <CalendarXIcon className="size-10 text-muted-foreground" />
-        <p className="text-lg font-medium">No meetings yet</p>
+      <div className="flex flex-col items-center gap-4 rounded-[20px] bg-card py-20 text-center">
+        <CalendarXIcon className="size-10 stroke-1 text-primary" />
+        <h2 className="text-3xl">No meetings yet</h2>
+        <p className="font-serif text-lg text-muted-foreground italic">
+          Plan the first one — it only takes a minute.
+        </p>
         <Button onClick={onAdd}>
           <PlusIcon />
           Add meeting
@@ -112,7 +142,7 @@ export function MeetingList({ onAdd, onDelete }: Props) {
   return (
     <>
       {/* Wide screens: table */}
-      <div className="hidden rounded-xl border md:block">
+      <div className="hidden rounded-[20px] bg-card px-2 py-1 md:block">
         <Table>
           <TableHeader>
             <TableRow>
@@ -120,16 +150,20 @@ export function MeetingList({ onAdd, onDelete }: Props) {
               <TableHead>When</TableHead>
               <TableHead>Place</TableHead>
               <TableHead>Participants</TableHead>
-              <TableHead className="w-12">
+              <TableHead className="w-24">
                 <span className="sr-only">Actions</span>
               </TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {meetings.data.map((meeting) => (
-              <TableRow key={meeting.id}>
+              <TableRow
+                key={meeting.id}
+                className="group cursor-pointer hover:bg-muted"
+                onClick={() => onOpen(meeting)}
+              >
                 <TableCell className="max-w-64 whitespace-normal">
-                  <div className="font-medium">{meeting.title}</div>
+                  <MeetingTitle meeting={meeting} />
                   {meeting.description && (
                     <div
                       className="truncate text-sm text-muted-foreground"
@@ -147,7 +181,7 @@ export function MeetingList({ onAdd, onDelete }: Props) {
                   <ParticipantBadges participants={meeting.participants} />
                 </TableCell>
                 <TableCell>
-                  <DeleteButton meeting={meeting} onDelete={() => onDelete(meeting)} />
+                  <RowActions meeting={meeting} onEdit={onEdit} onDelete={onDelete} />
                 </TableCell>
               </TableRow>
             ))}
@@ -158,18 +192,23 @@ export function MeetingList({ onAdd, onDelete }: Props) {
       {/* Narrow screens: cards */}
       <div className="flex flex-col gap-3 md:hidden">
         {meetings.data.map((meeting) => (
-          <Card key={meeting.id}>
+          <Card
+            key={meeting.id}
+            className="group cursor-pointer transition-colors hover:bg-muted"
+            onClick={() => onOpen(meeting)}
+          >
             <CardContent className="flex flex-col gap-2">
               <div className="flex items-start justify-between gap-2">
-                <div className="min-w-0">
-                  <div className="font-medium">{meeting.title}</div>
+                <div className="flex min-w-0 flex-col items-start">
+                  <MeetingTitle meeting={meeting} />
                   <div className="text-sm text-muted-foreground">{formatWhen(meeting)}</div>
                 </div>
-                <DeleteButton meeting={meeting} onDelete={() => onDelete(meeting)} />
+                <RowActions meeting={meeting} onEdit={onEdit} onDelete={onDelete} />
               </div>
               {meeting.description && (
                 <p className="line-clamp-2 text-sm text-muted-foreground">{meeting.description}</p>
               )}
+              <div className="hairline" />
               <div className="flex items-center gap-1 text-sm">
                 <MapPinIcon className="size-3.5 shrink-0 text-muted-foreground" />
                 <span className="truncate">{meeting.place}</span>

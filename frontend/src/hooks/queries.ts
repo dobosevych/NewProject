@@ -21,6 +21,14 @@ export function useCreateMeeting() {
   })
 }
 
+export function useUpdateMeeting() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: api.updateMeeting,
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: meetingsKey }),
+  })
+}
+
 export function useDeleteMeeting() {
   const queryClient = useQueryClient()
   return useMutation({

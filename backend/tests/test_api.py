@@ -95,6 +95,49 @@ async def test_list_meetings_sorted_by_start(client: AsyncClient) -> None:
     assert [m["title"] for m in response.json()] == ["Sooner", "Later"]
 
 
+async def test_update_meeting(client: AsyncClient) -> None:
+    olena = await make_participant(client, "Olena Koval", "olena@example.com")
+    taras = await make_participant(client, "Taras Shevchuk", "taras@example.com")
+    created = (
+        await client.post("/api/meetings", json=meeting_payload(participant_ids=[olena["id"]]))
+    ).json()
+
+    response = await client.put(
+        f"/api/meetings/{created['id']}",
+        json=meeting_payload(
+            title="Sprint review",
+            starts_at="2026-09-23T14:00:00Z",
+            ends_at="2026-09-23T15:00:00Z",
+            participant_ids=[taras["id"]],
+        ),
+    )
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["id"] == created["id"]
+    assert body["title"] == "Sprint review"
+    assert body["starts_at"] == "2026-09-23T14:00:00Z"
+    assert [p["id"] for p in body["participants"]] == [taras["id"]]
+    assert (await client.get(f"/api/meetings/{created['id']}")).json() == body
+    assert len((await client.get("/api/participants")).json()) == 2
+
+
+async def test_update_meeting_validation(client: AsyncClient) -> None:
+    created = (await client.post("/api/meetings", json=meeting_payload())).json()
+    url = f"/api/meetings/{created['id']}"
+
+    bad_times = meeting_payload(ends_at="2026-09-22T09:00:00+03:00")
+    assert (await client.put(url, json=bad_times)).status_code == 422
+    unknown = meeting_payload(participant_ids=[str(uuid.uuid4())])
+    assert (await client.put(url, json=unknown)).status_code == 422
+    assert (await client.get(url)).json()["title"] == created["title"]
+
+
+async def test_update_missing_meeting(client: AsyncClient) -> None:
+    response = await client.put(f"/api/meetings/{uuid.uuid4()}", json=meeting_payload())
+    assert response.status_code == 404
+
+
 async def test_delete_meeting_keeps_participants(client: AsyncClient) -> None:
     olena = await make_participant(client, "Olena Koval", "olena@example.com")
     created = (

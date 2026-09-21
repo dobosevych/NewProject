@@ -11,13 +11,13 @@ The project is a monorepo with a FastAPI backend, a React + shadcn/ui frontend, 
 ### In scope
 - List meetings (sorted by start time, soonest first).
 - Create a meeting.
+- View a meeting's details and edit it.
 - Delete a meeting (with a confirmation step in the UI).
 - List participants and create a participant (needed to assign participants to meetings).
 - Running the whole stack with one command (`make up`).
 
 ### Out of scope (v1)
 - Authentication and user accounts.
-- Editing an existing meeting.
 - Editing or deleting participants.
 - Recurring meetings, time-zone preferences per user, notifications, calendar sync.
 - Pagination (the list is expected to be small; can be added later).
@@ -136,6 +136,7 @@ Base path: `/api`. All request and response bodies are JSON. Datetimes are ISO 8
 | GET | `/api/meetings` | List all meetings with their participants, ordered by `starts_at` ascending | 200 `Meeting[]` |
 | GET | `/api/meetings/{id}` | Get one meeting | 200 `Meeting` |
 | POST | `/api/meetings` | Create a meeting | 201 `Meeting` |
+| PUT | `/api/meetings/{id}` | Replace a meeting's fields and participants (same body and rules as POST) | 200 `Meeting` |
 | DELETE | `/api/meetings/{id}` | Delete a meeting | 204 |
 | GET | `/api/participants` | List all participants, ordered by name | 200 `Participant[]` |
 | POST | `/api/participants` | Create a participant | 201 `Participant` |
@@ -229,6 +230,14 @@ A shadcn `Dialog` containing a form (react-hook-form + zod, same rules as the ba
 The participants combobox includes a **"+ New participant"** option that opens a small inline form (name, email) and, on save, calls `POST /api/participants` and selects the new participant.
 
 On submit: `POST /api/meetings`; on success close the dialog, refresh the list, and show a success toast (`Sonner`). Backend 422/409 errors are shown next to the relevant field or as a toast.
+
+### Meeting details and editing
+
+Clicking a meeting (table row or card) opens a details `Dialog` showing the title, time, place (a link if it is a URL), description, and participants with their emails, plus **Edit** and **Delete** buttons. Each row/card also has its own **Edit** (pencil) and **Delete** icon buttons.
+
+Edit reuses the Add meeting dialog, prefilled, titled "Edit meeting", with a "Save changes" button. On submit: `PUT /api/meetings/{id}`; on success close the dialog, refresh the list, and show a success toast.
+
+Dialogs never exceed the viewport height: the header and footer stay fixed and the body scrolls.
 
 ### Delete meeting
 

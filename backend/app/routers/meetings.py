@@ -36,21 +36,25 @@ async def get_meeting(meeting_id: uuid.UUID, session: SessionDep) -> Meeting:
     return await _get_meeting(session, meeting_id)
 
 
+async def _get_participants(
+    session: AsyncSession, participant_ids: list[uuid.UUID]
+) -> list[Participant]:
+    if not participant_ids:
+        return []
+    found = await session.scalars(select(Participant).where(Participant.id.in_(participant_ids)))
+    participants = list(found)
+    unknown = set(participant_ids) - {p.id for p in participants}
+    if unknown:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            f"Unknown participant ids: {', '.join(sorted(str(u) for u in unknown))}",
+        )
+    return participants
+
+
 @router.post("", response_model=MeetingRead, status_code=status.HTTP_201_CREATED)
 async def create_meeting(payload: MeetingCreate, session: SessionDep) -> Meeting:
-    participants: list[Participant] = []
-    if payload.participant_ids:
-        found = await session.scalars(
-            select(Participant).where(Participant.id.in_(payload.participant_ids))
-        )
-        participants = list(found)
-        unknown = set(payload.participant_ids) - {p.id for p in participants}
-        if unknown:
-            raise HTTPException(
-                status.HTTP_422_UNPROCESSABLE_CONTENT,
-                f"Unknown participant ids: {', '.join(sorted(str(u) for u in unknown))}",
-            )
-
+    participants = await _get_participants(session, payload.participant_ids)
     meeting = Meeting(
         title=payload.title,
         description=payload.description,
@@ -62,6 +66,22 @@ async def create_meeting(payload: MeetingCreate, session: SessionDep) -> Meeting
     session.add(meeting)
     await session.commit()
     return await _get_meeting(session, meeting.id)
+
+
+@router.put("/{meeting_id}", response_model=MeetingRead)
+async def update_meeting(
+    meeting_id: uuid.UUID, payload: MeetingCreate, session: SessionDep
+) -> Meeting:
+    meeting = await _get_meeting(session, meeting_id)
+    meeting.participants = await _get_participants(session, payload.participant_ids)
+    meeting.title = payload.title
+    meeting.description = payload.description
+    meeting.starts_at = payload.starts_at
+    meeting.ends_at = payload.ends_at
+    meeting.place = payload.place
+    await session.commit()
+    session.expunge(meeting)
+    return await _get_meeting(session, meeting_id)
 
 
 @router.delete("/{meeting_id}", status_code=status.HTTP_204_NO_CONTENT)
