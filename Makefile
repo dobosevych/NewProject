@@ -7,7 +7,7 @@ s ?=
 
 .DEFAULT_GOAL := help
 .PHONY: help env build up down restart logs ps migrate migration seed psql test lint format \
-	dev-backend dev-frontend install clean deploy-backend destroy-backend infra-lint
+	dev-backend dev-frontend install clean deploy deploy-backend deploy-frontend destroy-backend destroy-frontend infra-lint
 
 help: ## Show this help
 	@grep -hE '^[a-zA-Z_-]+:.*?## ' $(firstword $(MAKEFILE_LIST)) | \
@@ -80,11 +80,19 @@ AWS_ENV := AWS_ACCESS_KEY_ID="$(AWS_ACCESS_KEY_ID)" AWS_SECRET_ACCESS_KEY="$(AWS
 	APP_NAME="$(APP_NAME)" CORS_ORIGINS_AWS="$(CORS_ORIGINS_AWS)" \
 	EC2_INSTANCE_TYPE="$(EC2_INSTANCE_TYPE)"
 
+deploy: deploy-backend deploy-frontend ## Deploy the whole app to AWS
+
 deploy-backend: env ## Deploy backend + database to AWS free tier (CloudFormation, see infra/)
 	@$(AWS_ENV) ./infra/deploy-backend.sh
 
+deploy-frontend: env ## Deploy frontend to S3 + CloudFront (after deploy-backend)
+	@$(AWS_ENV) ./infra/deploy-frontend.sh
+
 destroy-backend: env ## Delete the AWS backend stacks (keeps a final DB snapshot)
 	@$(AWS_ENV) ./infra/destroy-backend.sh
+
+destroy-frontend: env ## Delete the S3 bucket and CloudFront distribution
+	@$(AWS_ENV) ./infra/destroy-frontend.sh
 
 infra-lint: ## Lint the CloudFormation templates
 	uvx cfn-lint infra/*.yaml

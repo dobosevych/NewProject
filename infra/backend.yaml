@@ -37,6 +37,9 @@ Parameters:
     Default: meetings
     AllowedPattern: "[a-zA-Z][a-zA-Z0-9_]*"
 
+Conditions:
+  IsUsEast1: !Equals [!Ref AWS::Region, us-east-1]
+
 Resources:
   # ---------------------------------------------------------------- Network
   # The instance sits in a public subnet so it can reach ECR without a NAT gateway.
@@ -278,6 +281,13 @@ Outputs:
     Value: !Sub http://${PublicIp}/api
   DocsUrl:
     Value: !Sub http://${PublicIp}/api/docs
+  PublicDnsName:
+    Description: Public DNS name of the Elastic IP (CloudFront origins cannot be IP addresses)
+    Value: !Join
+      - ""
+      - - ec2-
+        - !Join ["-", !Split [".", !Ref PublicIp]]
+        - !If [IsUsEast1, ".compute-1.amazonaws.com", !Sub ".${AWS::Region}.compute.amazonaws.com"]
   InstanceId:
     Value: !Ref Instance
   DatabaseEndpoint:

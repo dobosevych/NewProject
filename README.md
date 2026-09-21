@@ -40,15 +40,18 @@ make dev-backend    # Postgres in Docker, API on :8000 with reload
 make dev-frontend   # Vite on :5173, proxies /api to :8000
 ```
 
-## Deploy the backend to AWS
+## Deploy to AWS
 
-`make deploy-backend` deploys the API and its PostgreSQL database with CloudFormation (templates in [`infra/`](infra/)), sized for the AWS Free Tier: one EC2 instance running the backend container, one RDS `db.t4g.micro`, no load balancer or NAT gateway.
+Everything is described with CloudFormation in [`infra/`](infra/) and sized for the AWS Free Tier:
+
+- **Backend** (`make deploy-backend`): one EC2 instance running the backend container, and its PostgreSQL database on RDS `db.t4g.micro`. No load balancer or NAT gateway.
+- **Frontend** (`make deploy-frontend`): the built app in a private S3 bucket behind CloudFront. CloudFront also forwards `/api/*` to the backend, so the whole app is served over HTTPS from one `*.cloudfront.net` address.
 
 1. Put the credentials of an IAM user into `.env` (`AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_REGION`; see `.env.example` for the optional settings). `.env` is gitignored.
-2. `make deploy-backend`. It builds the image, pushes it to ECR, creates or updates the stacks, restarts the container, and prints the API URL. The first run takes 10-15 minutes because of the database; later runs take a few minutes.
-3. `make destroy-backend` deletes everything except a final database snapshot.
+2. `make deploy` (backend, then frontend). It prints the app URL. The first run takes about 20 minutes (database and CloudFront distribution); later runs take a few minutes. Deploy the two parts separately with `make deploy-backend` / `make deploy-frontend`.
+3. `make destroy-frontend` and `make destroy-backend` delete everything except a final database snapshot.
 
-Requires Docker and the AWS CLI. `make infra-lint` checks the templates. The API is served over plain HTTP on the instance's Elastic IP.
+Requires Docker, Node.js and the AWS CLI. `make infra-lint` checks the templates.
 
 ## Layout
 
