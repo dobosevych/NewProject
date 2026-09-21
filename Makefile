@@ -78,11 +78,11 @@ clean: ## Stop the stack and delete the database volume
 AWS_ENV := AWS_ACCESS_KEY_ID="$(AWS_ACCESS_KEY_ID)" AWS_SECRET_ACCESS_KEY="$(AWS_SECRET_ACCESS_KEY)" \
 	AWS_SESSION_TOKEN="$(AWS_SESSION_TOKEN)" AWS_REGION="$(AWS_REGION)" \
 	APP_NAME="$(APP_NAME)" CORS_ORIGINS_AWS="$(CORS_ORIGINS_AWS)" \
-	EC2_INSTANCE_TYPE="$(EC2_INSTANCE_TYPE)"
+	LAMBDA_MEMORY="$(LAMBDA_MEMORY)"
 
 deploy: deploy-backend deploy-frontend ## Deploy the whole app to AWS
 
-deploy-backend: env ## Deploy backend + database to AWS free tier (CloudFormation, see infra/)
+deploy-backend: env ## Deploy backend (Lambda) + database (RDS) to AWS, see infra/
 	@$(AWS_ENV) ./infra/deploy-backend.sh
 
 deploy-frontend: env ## Deploy frontend to S3 + CloudFront (after deploy-backend)

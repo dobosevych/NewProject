@@ -11,7 +11,7 @@ Parameters:
     AllowedPattern: "[a-z][a-z0-9-]*"
   BackendDomain:
     Type: String
-    Description: Public DNS name of the backend (PublicDnsName output of the backend stack).
+    Description: Host name of the backend Lambda function URL (ApiDomain output of the backend stack).
 
 Resources:
   Bucket:
@@ -77,8 +77,8 @@ Resources:
           - Id: backend
             DomainName: !Ref BackendDomain
             CustomOriginConfig:
-              OriginProtocolPolicy: http-only
-              HTTPPort: 80
+              OriginProtocolPolicy: https-only
+              OriginSSLProtocols: [TLSv1.2]
         DefaultCacheBehavior:
           TargetOriginId: frontend
           ViewerProtocolPolicy: redirect-to-https
@@ -94,7 +94,7 @@ Resources:
             AllowedMethods: [GET, HEAD, OPTIONS, PUT, PATCH, POST, DELETE]
             CachedMethods: [GET, HEAD]
             CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad # Managed-CachingDisabled
-            OriginRequestPolicyId: b689b0a8-53d0-40ab-baf2-68738e2966ac # Managed-AllViewerExceptHostHeader
+            OriginRequestPolicyId: b689b0a8-53d0-40ab-baf2-68738e2966ac # Managed-AllViewerExceptHostHeader (function URLs need their own Host)
 
 Outputs:
   BucketName:

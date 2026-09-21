@@ -10,7 +10,7 @@ main() {
   source infra/common.sh
 
   stack_exists "$BACKEND_STACK" || { echo "Stack $BACKEND_STACK not found; run make deploy-backend first." >&2; exit 1; }
-  backend_domain="$(output "$BACKEND_STACK" PublicDnsName)"
+  backend_domain="$(output "$BACKEND_STACK" ApiDomain)"
 
   echo "==> [1/4] Build the frontend"
   (cd frontend && npm ci && npm run build)
@@ -21,6 +21,7 @@ main() {
     --stack-name "$FRONTEND_STACK" \
     --template-file infra/frontend.yaml \
     --parameter-overrides "AppName=$APP_NAME" "BackendDomain=$backend_domain" \
+    --tags "${STACK_TAGS[@]}" \
     --no-fail-on-empty-changeset
   bucket="$(output "$FRONTEND_STACK" BucketName)"
   distribution="$(output "$FRONTEND_STACK" DistributionId)"

@@ -15,7 +15,7 @@ main() {
   read -r -p "Delete stacks $APP_NAME-backend and $APP_NAME-ecr in $AWS_REGION? Type the app name to confirm: " answer
   [ "$answer" = "$APP_NAME" ] || { echo "Aborted."; exit 1; }
 
-  echo "==> Deleting $APP_NAME-backend (takes several minutes)"
+  echo "==> Deleting $APP_NAME-backend (Lambda's VPC network interfaces can take up to ~20 minutes to release)"
   aws cloudformation delete-stack --stack-name "$BACKEND_STACK"
   aws cloudformation wait stack-delete-complete --stack-name "$BACKEND_STACK"
 

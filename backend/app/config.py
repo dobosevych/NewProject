@@ -8,6 +8,9 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
     database_url: str = "postgresql+asyncpg://meetings:meetings@localhost:5432/meetings"
+    # Lambda serves one request per instance at a time, so it runs with a pool of 1.
+    db_pool_size: int = 5
+    db_max_overflow: int = 10
     cors_origins: Annotated[list[str], NoDecode] = [
         "http://localhost:5173",
         "http://localhost:3000",

@@ -1,6 +1,7 @@
 import asyncio
 from logging.config import fileConfig
 
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine
 
 from alembic import context
@@ -12,6 +13,10 @@ if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
 target_metadata = Base.metadata
+
+# Migrations run on every container start; on Lambda several instances can start at once.
+# A session-level advisory lock makes them take turns (the rest then find nothing to do).
+MIGRATION_LOCK_ID = 7_120_531
 
 
 def run_migrations_offline() -> None:
@@ -26,9 +31,15 @@ def run_migrations_offline() -> None:
 
 
 def do_run_migrations(connection) -> None:
-    context.configure(connection=connection, target_metadata=target_metadata)
-    with context.begin_transaction():
-        context.run_migrations()
+    connection.execute(text("SELECT pg_advisory_lock(:id)"), {"id": MIGRATION_LOCK_ID})
+    connection.commit()
+    try:
+        context.configure(connection=connection, target_metadata=target_metadata)
+        with context.begin_transaction():
+            context.run_migrations()
+    finally:
+        connection.execute(text("SELECT pg_advisory_unlock(:id)"), {"id": MIGRATION_LOCK_ID})
+        connection.commit()
 
 
 async def run_migrations_online() -> None:

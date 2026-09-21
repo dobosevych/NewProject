@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Deploys the backend and its database to AWS. Run via `make deploy-backend`,
-# which loads the AWS credentials and settings from .env.
+# Deploys the backend (AWS Lambda) and its database (RDS) to AWS. Run via
+# `make deploy-backend`, which loads the AWS credentials and settings from .env.
 set -euo pipefail
 
 # Everything runs inside main so bash parses the whole file before starting. Otherwise
@@ -9,8 +9,8 @@ main() {
   cd "$(dirname "$0")/.."
   source infra/common.sh
 
-  EC2_INSTANCE_TYPE="${EC2_INSTANCE_TYPE:-t3.micro}"
   CORS_ORIGINS_AWS="${CORS_ORIGINS_AWS:-http://localhost:5173}"
+  LAMBDA_MEMORY="${LAMBDA_MEMORY:-512}"
   PASSWORD_PARAM="/$APP_NAME/db-password"
 
   # Git SHA, plus a timestamp when backend/ has uncommitted changes (ECR tags are immutable).
@@ -22,7 +22,7 @@ main() {
   account="$(aws sts get-caller-identity --query Account --output text)"
   echo "==> Deploying '$APP_NAME' backend $TAG to account $account in $AWS_REGION"
 
-  echo "==> [1/6] Database password ($PASSWORD_PARAM)"
+  echo "==> [1/5] Database password ($PASSWORD_PARAM)"
   if aws ssm get-parameter --name "$PASSWORD_PARAM" >/dev/null 2>&1; then
     echo "    exists, keeping it"
   else
@@ -31,27 +31,33 @@ main() {
       --value "$(openssl rand -hex 24)" >/dev/null
     echo "    created"
   fi
+  # Idempotent, so parameters created before tagging was added get tagged too.
+  aws ssm add-tags-to-resource --resource-type Parameter --resource-id "$PASSWORD_PARAM" \
+    --tags "Key=$TAG_KEY,Value=$APP_NAME"
+  db_password="$(aws ssm get-parameter --name "$PASSWORD_PARAM" --with-decryption \
+    --query Parameter.Value --output text)"
 
-  echo "==> [2/6] Container registry ($ECR_STACK)"
+  echo "==> [2/5] Container registry ($ECR_STACK)"
   aws cloudformation deploy \
     --stack-name "$ECR_STACK" \
     --template-file infra/ecr.yaml \
     --parameter-overrides "AppName=$APP_NAME" \
+    --tags "${STACK_TAGS[@]}" \
     --no-fail-on-empty-changeset
   repository="$(output "$ECR_STACK" RepositoryUri)"
   image="$repository:$TAG"
 
-  echo "==> [3/6] Build and push $image"
+  echo "==> [3/5] Build and push $image"
   if aws ecr describe-images --repository-name "$APP_NAME-backend" --image-ids "imageTag=$TAG" >/dev/null 2>&1; then
     echo "    already in ECR, skipping"
   else
-    # The free-tier instance types are x86_64.
-    docker build --platform linux/amd64 --tag "$image" backend
+    # Lambda accepts only single-platform images without attestation manifests.
+    docker build --platform linux/arm64 --provenance=false --sbom=false --tag "$image" backend
     aws ecr get-login-password | docker login --username AWS --password-stdin "${repository%%/*}"
     docker push "$image"
   fi
 
-  echo "==> [4/6] Backend + database ($BACKEND_STACK)"
+  echo "==> [4/5] Lambda + database ($BACKEND_STACK)"
   echo "    The first run creates the RDS database and takes about 10-15 minutes."
   aws cloudformation deploy \
     --stack-name "$BACKEND_STACK" \
@@ -60,45 +66,17 @@ main() {
     --parameter-overrides \
       "AppName=$APP_NAME" \
       "ImageUri=$image" \
-      "InstanceType=$EC2_INSTANCE_TYPE" \
+      "DBPassword=$db_password" \
+      "MemorySize=$LAMBDA_MEMORY" \
       "CorsOrigins=$CORS_ORIGINS_AWS" \
+    --tags "${STACK_TAGS[@]}" \
     --no-fail-on-empty-changeset
-  instance="$(output "$BACKEND_STACK" InstanceId)"
   api_url="$(output "$BACKEND_STACK" ApiUrl)"
 
-  echo "==> [5/6] Restart the container on $instance"
-  for _ in $(seq 60); do
-    status="$(aws ssm describe-instance-information \
-      --filters "Key=InstanceIds,Values=$instance" \
-      --query 'InstanceInformationList[0].PingStatus' --output text)"
-    [ "$status" = "Online" ] && break
-    sleep 5
-  done
-  [ "$status" = "Online" ] || { echo "Instance $instance never came online in SSM" >&2; exit 1; }
-
-  command_id="$(aws ssm send-command \
-    --instance-ids "$instance" \
-    --document-name AWS-RunShellScript \
-    --comment "deploy $TAG" \
-    --parameters 'commands=["cloud-init status --wait >/dev/null","/opt/app/run.sh"]' \
-    --query Command.CommandId --output text)"
-  # Poll instead of `aws ssm wait`, which gives up after ~100 s (first boot can take longer).
-  for _ in $(seq 120); do
-    sleep 5
-    result="$(aws ssm get-command-invocation --command-id "$command_id" --instance-id "$instance" \
-      --query Status --output text 2>/dev/null || echo Pending)"
-    case "$result" in Pending | InProgress | Delayed) continue ;; *) break ;; esac
-  done
-  if [ "$result" != "Success" ]; then
-    echo "Restart failed ($result):" >&2
-    aws ssm get-command-invocation --command-id "$command_id" --instance-id "$instance" \
-      --query '[StandardOutputContent, StandardErrorContent]' --output text >&2
-    exit 1
-  fi
-
-  echo "==> [6/6] Wait for $api_url/health"
-  for _ in $(seq 36); do
-    if curl -fsS --max-time 5 "$api_url/health" >/dev/null 2>&1; then
+  # The first request after a deploy is a cold start: migrations check + app startup.
+  echo "==> [5/5] Wait for $api_url/health"
+  for _ in $(seq 24); do
+    if curl -fsS --max-time 30 "$api_url/health" >/dev/null 2>&1; then
       echo
       echo "API:  $api_url"
       echo "Docs: $(output "$BACKEND_STACK" DocsUrl)"

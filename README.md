@@ -44,7 +44,7 @@ make dev-frontend   # Vite on :5173, proxies /api to :8000
 
 Everything is described with CloudFormation in [`infra/`](infra/) and sized for the AWS Free Tier:
 
-- **Backend** (`make deploy-backend`): one EC2 instance running the backend container, and its PostgreSQL database on RDS `db.t4g.micro`. No load balancer or NAT gateway.
+- **Backend** (`make deploy-backend`): the backend container on AWS Lambda (via [Lambda Web Adapter](https://github.com/awslabs/aws-lambda-web-adapter), so the FastAPI app runs unchanged) and its PostgreSQL database on RDS `db.t4g.micro`. The function runs in the database's private subnets; there is no NAT gateway, load balancer or public IP.
 - **Frontend** (`make deploy-frontend`): the built app in a private S3 bucket behind CloudFront. CloudFront also forwards `/api/*` to the backend, so the whole app is served over HTTPS from one `*.cloudfront.net` address.
 
 1. Put the credentials of an IAM user into `.env` (`AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_REGION`; see `.env.example` for the optional settings). `.env` is gitignored.
@@ -52,6 +52,8 @@ Everything is described with CloudFormation in [`infra/`](infra/) and sized for 
 3. `make destroy-frontend` and `make destroy-backend` delete everything except a final database snapshot.
 
 Requires Docker, Node.js and the AWS CLI. `make infra-lint` checks the templates.
+
+Every AWS resource is tagged `App=<APP_NAME>`, so the whole app can be found with Resource Groups & Tag Editor, and its costs split out in Billing once `App` is activated as a cost allocation tag.
 
 ## Layout
 
