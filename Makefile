@@ -7,11 +7,11 @@ s ?=
 
 .DEFAULT_GOAL := help
 .PHONY: help env build up down restart logs ps migrate migration seed psql test lint format \
-	dev-backend dev-frontend install clean
+	dev-backend dev-frontend install clean deploy-backend destroy-backend infra-lint
 
 help: ## Show this help
 	@grep -hE '^[a-zA-Z_-]+:.*?## ' $(firstword $(MAKEFILE_LIST)) | \
-		awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-14s\033[0m %s\n", $$1, $$2}'
+		awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-16s\033[0m %s\n", $$1, $$2}'
 
 env: ## Create .env from .env.example if missing
 	@test -f .env || (cp .env.example .env && echo "Created .env")
@@ -73,3 +73,18 @@ dev-frontend: ## Run Vite dev server on http://localhost:5173 (proxies /api to :
 
 clean: ## Stop the stack and delete the database volume
 	$(COMPOSE) down -v
+
+# AWS credentials and settings come from .env; export them only to the recipes below.
+AWS_ENV := AWS_ACCESS_KEY_ID="$(AWS_ACCESS_KEY_ID)" AWS_SECRET_ACCESS_KEY="$(AWS_SECRET_ACCESS_KEY)" \
+	AWS_SESSION_TOKEN="$(AWS_SESSION_TOKEN)" AWS_REGION="$(AWS_REGION)" \
+	APP_NAME="$(APP_NAME)" CORS_ORIGINS_AWS="$(CORS_ORIGINS_AWS)" \
+	EC2_INSTANCE_TYPE="$(EC2_INSTANCE_TYPE)"
+
+deploy-backend: env ## Deploy backend + database to AWS free tier (CloudFormation, see infra/)
+	@$(AWS_ENV) ./infra/deploy-backend.sh
+
+destroy-backend: env ## Delete the AWS backend stacks (keeps a final DB snapshot)
+	@$(AWS_ENV) ./infra/destroy-backend.sh
+
+infra-lint: ## Lint the CloudFormation templates
+	uvx cfn-lint infra/*.yaml
