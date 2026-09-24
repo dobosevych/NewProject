@@ -38,9 +38,12 @@ cors_origins() {
   if stack_exists "$FRONTEND_STACK"; then
     candidates="$(output "$FRONTEND_STACK" AppUrl),$(output "$FRONTEND_STACK" CustomDomainUrl)"
   fi
-  for origin in $(echo "$candidates,${CORS_ORIGINS_AWS:-}" | tr ',' ' '); do
-    origins="${origins:+$origins,}$origin"
-  done
+  # Read line by line rather than word-splitting, so "*" (allow any origin) is not
+  # expanded into file names.
+  while IFS= read -r origin; do
+    origin="${origin//[[:space:]]/}"
+    [ -n "$origin" ] && origins="${origins:+$origins,}$origin"
+  done < <(echo "$candidates,${CORS_ORIGINS_AWS:-}" | tr ',' '\n')
   echo "${origins:-http://localhost:5173}"
 }
 
