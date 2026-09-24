@@ -7,7 +7,7 @@ s ?=
 
 .DEFAULT_GOAL := help
 .PHONY: help env build up down restart logs ps migrate migration seed psql test lint format \
-	dev-backend dev-frontend install clean deploy deploy-backend deploy-frontend destroy-backend destroy-frontend infra-lint
+	dev-backend dev-frontend install clean deploy deploy-backend deploy-frontend destroy-backend destroy-frontend add-domain remove-domain infra-lint
 
 help: ## Show this help
 	@grep -hE '^[a-zA-Z_-]+:.*?## ' $(firstword $(MAKEFILE_LIST)) | \
@@ -77,21 +77,27 @@ clean: ## Stop the stack and delete the database volume
 # AWS credentials and settings come from .env; export them only to the recipes below.
 AWS_ENV := AWS_ACCESS_KEY_ID="$(AWS_ACCESS_KEY_ID)" AWS_SECRET_ACCESS_KEY="$(AWS_SECRET_ACCESS_KEY)" \
 	AWS_SESSION_TOKEN="$(AWS_SESSION_TOKEN)" AWS_REGION="$(AWS_REGION)" \
-	APP_NAME="$(APP_NAME)" CORS_ORIGINS_AWS="$(CORS_ORIGINS_AWS)" \
-	LAMBDA_MEMORY="$(LAMBDA_MEMORY)"
+	PROJECT_NAME="$(or $(PROJECT_NAME),$(APP_NAME))" CORS_ORIGINS_AWS="$(CORS_ORIGINS_AWS)" \
+	LAMBDA_MEMORY="$(LAMBDA_MEMORY)" DOMAIN_NAME="$(DOMAIN_NAME)" HOSTED_ZONE_ID="$(HOSTED_ZONE_ID)"
 
 deploy: deploy-backend deploy-frontend ## Deploy the whole app to AWS
 
-deploy-backend: env ## Deploy backend (Lambda) + database (RDS) to AWS, see infra/
+deploy-backend: env ## Deploy backend (Lambda) + database (Aurora Serverless) to AWS, see infra/
 	@$(AWS_ENV) ./infra/deploy-backend.sh
 
-deploy-frontend: env ## Deploy frontend to S3 + CloudFront (after deploy-backend)
+deploy-frontend: env ## Deploy frontend to S3 + CloudFront, wired to the Lambda URL (after deploy-backend)
 	@$(AWS_ENV) ./infra/deploy-frontend.sh
+
+add-domain: env ## Attach DOMAIN_NAME from .env to the deployed frontend
+	@$(AWS_ENV) ./infra/add-domain.sh
+
+remove-domain: env ## Detach the custom domain and delete its certificate
+	@$(AWS_ENV) ./infra/remove-domain.sh
 
 destroy-backend: env ## Delete the AWS backend stacks (keeps a final DB snapshot)
 	@$(AWS_ENV) ./infra/destroy-backend.sh
 
-destroy-frontend: env ## Delete the S3 bucket and CloudFront distribution
+destroy-frontend: env ## Delete the S3 bucket, CloudFront distribution and domain certificate
 	@$(AWS_ENV) ./infra/destroy-frontend.sh
 
 infra-lint: ## Lint the CloudFormation templates

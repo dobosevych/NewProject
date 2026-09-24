@@ -1,10 +1,10 @@
 AWSTemplateFormatVersion: "2010-09-09"
 Description: >-
   Meetings app - container registry for the backend image. Deployed before
-  backend.yaml, because the image must be pushed before the ECS service can start.
+  backend.yaml, because the image must be pushed before the Lambda function can be created.
 
 Parameters:
-  AppName:
+  ProjectName:
     Type: String
     Default: meetings
     AllowedPattern: "[a-z][a-z0-9-]*"
@@ -13,7 +13,7 @@ Resources:
   BackendRepository:
     Type: AWS::ECR::Repository
     Properties:
-      RepositoryName: !Sub ${AppName}-backend
+      RepositoryName: !Sub ${ProjectName}-backend
       ImageTagMutability: IMMUTABLE
       ImageScanningConfiguration:
         ScanOnPush: true
@@ -44,6 +44,9 @@ Resources:
               }
             ]
           }
+      Tags:
+        - Key: PROJECT_NAME
+          Value: !Ref ProjectName
 
 Outputs:
   RepositoryUri:

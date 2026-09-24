@@ -38,6 +38,10 @@ export class ApiError extends Error {
   }
 }
 
+// Backend origin, set at build time for AWS (the Lambda function URL). Empty locally,
+// where the Vite dev server or nginx proxies /api to the backend.
+const API_URL = (import.meta.env.VITE_API_URL ?? '').replace(/\/+$/, '')
+
 type ValidationIssue = { loc?: (string | number)[]; msg: string }
 
 function errorMessage(detail: unknown, fallback: string): string {
@@ -55,7 +59,7 @@ function errorMessage(detail: unknown, fallback: string): string {
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(`/api${path}`, {
+  const response = await fetch(`${API_URL}/api${path}`, {
     ...init,
     headers: { 'Content-Type': 'application/json', ...init?.headers },
   })

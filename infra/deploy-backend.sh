@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Deploys the backend (AWS Lambda) and its database (RDS) to AWS. Run via
+# Deploys the backend (AWS Lambda) and its database (Aurora Serverless v2) to AWS. Run via
 # `make deploy-backend`, which loads the AWS credentials and settings from .env.
 set -euo pipefail
 
@@ -9,9 +9,8 @@ main() {
   cd "$(dirname "$0")/.."
   source infra/common.sh
 
-  CORS_ORIGINS_AWS="${CORS_ORIGINS_AWS:-http://localhost:5173}"
   LAMBDA_MEMORY="${LAMBDA_MEMORY:-512}"
-  PASSWORD_PARAM="/$APP_NAME/db-password"
+  PASSWORD_PARAM="/$PROJECT_NAME/db-password"
 
   # Git SHA, plus a timestamp when backend/ has uncommitted changes (ECR tags are immutable).
   TAG="$(git rev-parse --short HEAD)"
@@ -20,7 +19,7 @@ main() {
   fi
 
   account="$(aws sts get-caller-identity --query Account --output text)"
-  echo "==> Deploying '$APP_NAME' backend $TAG to account $account in $AWS_REGION"
+  echo "==> Deploying '$PROJECT_NAME' backend $TAG to account $account in $AWS_REGION"
 
   echo "==> [1/5] Database password ($PASSWORD_PARAM)"
   if aws ssm get-parameter --name "$PASSWORD_PARAM" >/dev/null 2>&1; then
@@ -33,7 +32,7 @@ main() {
   fi
   # Idempotent, so parameters created before tagging was added get tagged too.
   aws ssm add-tags-to-resource --resource-type Parameter --resource-id "$PASSWORD_PARAM" \
-    --tags "Key=$TAG_KEY,Value=$APP_NAME"
+    --tags "Key=$TAG_KEY,Value=$PROJECT_NAME"
   db_password="$(aws ssm get-parameter --name "$PASSWORD_PARAM" --with-decryption \
     --query Parameter.Value --output text)"
 
@@ -41,14 +40,14 @@ main() {
   aws cloudformation deploy \
     --stack-name "$ECR_STACK" \
     --template-file infra/ecr.yaml \
-    --parameter-overrides "AppName=$APP_NAME" \
+    --parameter-overrides "ProjectName=$PROJECT_NAME" \
     --tags "${STACK_TAGS[@]}" \
     --no-fail-on-empty-changeset
   repository="$(output "$ECR_STACK" RepositoryUri)"
   image="$repository:$TAG"
 
   echo "==> [3/5] Build and push $image"
-  if aws ecr describe-images --repository-name "$APP_NAME-backend" --image-ids "imageTag=$TAG" >/dev/null 2>&1; then
+  if aws ecr describe-images --repository-name "$PROJECT_NAME-backend" --image-ids "imageTag=$TAG" >/dev/null 2>&1; then
     echo "    already in ECR, skipping"
   else
     # Lambda accepts only single-platform images without attestation manifests.
@@ -58,17 +57,20 @@ main() {
   fi
 
   echo "==> [4/5] Lambda + database ($BACKEND_STACK)"
-  echo "    The first run creates the RDS database and takes about 10-15 minutes."
+  # Includes the frontend's addresses once it is deployed, so a redeploy keeps them.
+  cors="$(cors_origins)"
+  echo "    CORS origins: $cors"
+  echo "    The first run creates the Aurora database and takes about 10-15 minutes."
   aws cloudformation deploy \
     --stack-name "$BACKEND_STACK" \
     --template-file infra/backend.yaml \
     --capabilities CAPABILITY_IAM \
     --parameter-overrides \
-      "AppName=$APP_NAME" \
+      "ProjectName=$PROJECT_NAME" \
       "ImageUri=$image" \
       "DBPassword=$db_password" \
       "MemorySize=$LAMBDA_MEMORY" \
-      "CorsOrigins=$CORS_ORIGINS_AWS" \
+      "CorsOrigins=$cors" \
     --tags "${STACK_TAGS[@]}" \
     --no-fail-on-empty-changeset
   api_url="$(output "$BACKEND_STACK" ApiUrl)"
@@ -84,7 +86,7 @@ main() {
     fi
     sleep 5
   done
-  echo "Backend did not become healthy. Logs: aws logs tail /$APP_NAME/backend --follow" >&2
+  echo "Backend did not become healthy. Logs: aws logs tail /$PROJECT_NAME/backend --follow" >&2
   exit 1
 }
 

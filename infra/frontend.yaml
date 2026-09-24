@@ -1,17 +1,43 @@
 AWSTemplateFormatVersion: "2010-09-09"
 Description: >-
-  Meetings app - frontend on a private S3 bucket behind CloudFront. CloudFront also
-  forwards /api/* to the backend, so the app is served over HTTPS from one origin
-  (no CORS, no mixed content). Stays within the S3 and CloudFront free tiers.
+  Meetings app - frontend on a private S3 bucket behind CloudFront (pay-as-you-go pricing,
+  no flat-rate plan). The app calls the backend's Lambda function URL directly. A custom
+  domain can be attached later with `make add-domain`.
 
 Parameters:
-  AppName:
+  ProjectName:
     Type: String
     Default: meetings
     AllowedPattern: "[a-z][a-z0-9-]*"
-  BackendDomain:
+  PriceClass:
     Type: String
-    Description: Host name of the backend Lambda function URL (ApiDomain output of the backend stack).
+    Default: PriceClass_100
+    AllowedValues: [PriceClass_100, PriceClass_200, PriceClass_All]
+    Description: >-
+      Edge locations to serve from. PriceClass_100 (North America and Europe) is the cheapest;
+      pay-as-you-go also includes 1 TB and 10M requests per month free.
+  DomainName:
+    Type: String
+    Default: ""
+    Description: Optional custom domain, e.g. app.example.com (set by `make add-domain`).
+  CertificateArn:
+    Type: String
+    Default: ""
+    Description: ACM certificate in us-east-1 covering DomainName (set by `make add-domain`).
+  HostedZoneId:
+    Type: String
+    Default: ""
+    Description: >-
+      Optional Route 53 hosted zone of DomainName. If set, the alias records are created here;
+      otherwise point the domain at the distribution yourself.
+
+Conditions:
+  HasDomain: !And
+    - !Not [!Equals [!Ref DomainName, ""]]
+    - !Not [!Equals [!Ref CertificateArn, ""]]
+  HasHostedZone: !And
+    - !Condition HasDomain
+    - !Not [!Equals [!Ref HostedZoneId, ""]]
 
 Resources:
   Bucket:
@@ -29,12 +55,16 @@ Resources:
         ServerSideEncryptionConfiguration:
           - ServerSideEncryptionByDefault:
               SSEAlgorithm: AES256
+      Tags:
+        - Key: PROJECT_NAME
+          Value: !Ref ProjectName
 
+  # Origin access controls, bucket policies and DNS records have no tags.
   OriginAccessControl:
     Type: AWS::CloudFront::OriginAccessControl
     Properties:
       OriginAccessControlConfig:
-        Name: !Sub ${AppName}-frontend
+        Name: !Sub ${ProjectName}-frontend
         OriginAccessControlOriginType: s3
         SigningBehavior: always
         SigningProtocol: sigv4
@@ -59,26 +89,26 @@ Resources:
     Type: AWS::CloudFront::Distribution
     Properties:
       DistributionConfig:
-        Comment: !Sub ${AppName} frontend + API
+        Comment: !Sub ${ProjectName} frontend
         Enabled: true
         DefaultRootObject: index.html
-        # No 403/404 -> index.html fallback: the app has no client-side routes, and a
-        # fallback would also replace the API's JSON 404s with the HTML page.
+        # The app has no client-side routes, so there is no 403/404 -> index.html fallback.
         HttpVersion: http2and3
         IPV6Enabled: true
-        # Cheapest price class: North America and Europe edge locations.
-        PriceClass: PriceClass_100
+        PriceClass: !Ref PriceClass
+        Aliases: !If [HasDomain, [!Ref DomainName], !Ref AWS::NoValue]
+        ViewerCertificate: !If
+          - HasDomain
+          - AcmCertificateArn: !Ref CertificateArn
+            SslSupportMethod: sni-only
+            MinimumProtocolVersion: TLSv1.2_2021
+          - CloudFrontDefaultCertificate: true
         Origins:
           - Id: frontend
             DomainName: !GetAtt Bucket.RegionalDomainName
             OriginAccessControlId: !Ref OriginAccessControl
             S3OriginConfig:
               OriginAccessIdentity: ""
-          - Id: backend
-            DomainName: !Ref BackendDomain
-            CustomOriginConfig:
-              OriginProtocolPolicy: https-only
-              OriginSSLProtocols: [TLSv1.2]
         DefaultCacheBehavior:
           TargetOriginId: frontend
           ViewerProtocolPolicy: redirect-to-https
@@ -86,20 +116,43 @@ Resources:
           AllowedMethods: [GET, HEAD]
           CachedMethods: [GET, HEAD]
           CachePolicyId: 658327ea-f89d-4fab-a63d-7e88639e58f6 # Managed-CachingOptimized
-        CacheBehaviors:
-          - PathPattern: /api/*
-            TargetOriginId: backend
-            ViewerProtocolPolicy: redirect-to-https
-            Compress: true
-            AllowedMethods: [GET, HEAD, OPTIONS, PUT, PATCH, POST, DELETE]
-            CachedMethods: [GET, HEAD]
-            CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad # Managed-CachingDisabled
-            OriginRequestPolicyId: b689b0a8-53d0-40ab-baf2-68738e2966ac # Managed-AllViewerExceptHostHeader (function URLs need their own Host)
+      Tags:
+        - Key: PROJECT_NAME
+          Value: !Ref ProjectName
+
+  # Z2FDTNDATAQYW2 is the fixed hosted zone of every CloudFront distribution.
+  DomainRecordIPv4:
+    Type: AWS::Route53::RecordSet
+    Condition: HasHostedZone
+    Properties:
+      HostedZoneId: !Ref HostedZoneId
+      Name: !Ref DomainName
+      Type: A
+      AliasTarget:
+        DNSName: !GetAtt Distribution.DomainName
+        HostedZoneId: Z2FDTNDATAQYW2
+
+  DomainRecordIPv6:
+    Type: AWS::Route53::RecordSet
+    Condition: HasHostedZone
+    Properties:
+      HostedZoneId: !Ref HostedZoneId
+      Name: !Ref DomainName
+      Type: AAAA
+      AliasTarget:
+        DNSName: !GetAtt Distribution.DomainName
+        HostedZoneId: Z2FDTNDATAQYW2
 
 Outputs:
   BucketName:
     Value: !Ref Bucket
   DistributionId:
     Value: !Ref Distribution
+  DistributionDomain:
+    Description: Target for a CNAME record when the custom domain's DNS is not in Route 53
+    Value: !GetAtt Distribution.DomainName
   AppUrl:
     Value: !Sub https://${Distribution.DomainName}
+  CustomDomainUrl:
+    Condition: HasDomain
+    Value: !Sub https://${DomainName}
