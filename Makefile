@@ -7,8 +7,7 @@ s ?=
 
 .DEFAULT_GOAL := help
 .PHONY: help env build up down restart logs ps migrate migration seed psql test lint format \
-	dev-backend dev-frontend install clean tf-init plan deploy cognito-env destroy infra-lint
-
+    dev-backend dev-frontend install clean tf-init plan deploy cognito-env destroy infra-lint
 help: ## Show this help
 	@grep -hE '^[a-zA-Z_-]+:.*?## ' $(firstword $(MAKEFILE_LIST)) | \
 		awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-16s\033[0m %s\n", $$1, $$2}'
@@ -87,6 +86,7 @@ TF_ENV := AWS_ACCESS_KEY_ID="$(AWS_ACCESS_KEY_ID)" AWS_SECRET_ACCESS_KEY="$(AWS_
 	TF_VAR_google_client_id="$(GOOGLE_CLIENT_ID)" TF_VAR_google_client_secret="$(GOOGLE_CLIENT_SECRET)"
 COGNITO_KEYS := COGNITO_USER_POOL_ID COGNITO_CLIENT_ID COGNITO_DOMAIN COGNITO_GOOGLE_ENABLED
 
+deploy: deploy-backend deploy-frontend ## Deploy the whole app to AWS (after make auth-env)
 tf-init: env ## Connect infra/ to its HCP Terraform workspace and install the providers
 	@$(TF) init
 
@@ -123,6 +123,25 @@ destroy: env ## Delete the app from AWS (keeps the Cognito user pool and a final
 		$(TF) state rm module.auth.aws_cognito_user_pool.this; \
 	fi
 	@$(TF) destroy
+report-now:
+	aws sqs send-message \
+		--queue-url $$(terraform -chdir=infra output -raw queue_url) \
+		--message-body '{"week": "$(WEEK)", "source": "manual"}'
+
+llm-hello:
+	python scripts/llm_hello.py
+
+parse:
+	PYTHONPATH=backend python -m app.ai.cli "$(TEXT)"
+
+infra-plan: ## Terraform plan (apply happens only in HCP Terraform after a merge)
+	terraform -chdir=infra plan
+
+infra-fmt: ## Format the Terraform files
+	terraform -chdir=infra fmt
+
+auth-env: env ## Write the Cognito settings from Terraform outputs to .env
+	@./infra/auth-env.sh
 
 infra-lint: ## Check formatting and validate the Terraform configuration
 	terraform -chdir=infra fmt -check -recursive

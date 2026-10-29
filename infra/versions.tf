@@ -1,3 +1,14 @@
+<<<<<<< HEAD
+terraform {
+  required_version = ">= 1.10"
+
+  cloud {
+    organization = "ooad-lab-Yarynka23"
+    workspaces {
+      name = "meetings-dev"
+    }
+  }
+=======
 # State lives in HCP Terraform. The organization and workspace come from TF_CLOUD_ORGANIZATION
 # and TF_WORKSPACE (set in .env); the token from TF_TOKEN_app_terraform_io. The workspace uses
 # local execution (infra/hcp-workspace.sh sets it up): plans and applies run on this machine,
@@ -6,12 +17,18 @@ terraform {
   required_version = ">= 1.10"
 
   cloud {}
+>>>>>>> upstream/main
 
   required_providers {
     aws = {
       source  = "hashicorp/aws"
       version = "~> 6.0"
     }
+<<<<<<< HEAD
+    archive = {
+      source  = "hashicorp/archive"
+      version = "~> 2.4"
+=======
     http = {
       source  = "hashicorp/http"
       version = "~> 3.4"
@@ -19,10 +36,21 @@ terraform {
     random = {
       source  = "hashicorp/random"
       version = "~> 3.6"
+>>>>>>> upstream/main
     }
   }
 }
 
+<<<<<<< HEAD
+provider "aws" {
+  region = var.region
+
+  default_tags {
+    tags = {
+      PROJECT_NAME = var.project_name
+      ManagedBy    = "terraform"
+    }
+=======
 # Every resource that supports tags is tagged PROJECT_NAME=<project_name>.
 provider "aws" {
   region = var.aws_region
@@ -39,5 +67,6 @@ provider "aws" {
 
   default_tags {
     tags = { PROJECT_NAME = var.project_name }
+>>>>>>> upstream/main
   }
 }
