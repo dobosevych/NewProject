@@ -1,4 +1,4 @@
-FROM python:3.14-slim
+FROM public.ecr.aws/docker/library/python:3.14-slim
 
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 # Lets the unchanged uvicorn app run on AWS Lambda; inert everywhere else.
@@ -13,7 +13,9 @@ ENV UV_COMPILE_BYTECODE=1 \
 WORKDIR /app
 
 COPY pyproject.toml uv.lock ./
+ENV UV_COMPILE_BYTECODE_TIMEOUT=600
 RUN uv sync --locked --no-install-project
+RUN uv pip install awslambdaric boto3
 
 COPY . .
 
